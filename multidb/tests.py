@@ -234,6 +234,9 @@ class MiddlewareUsingCacheTests(UnpinningTestCase):
         self.middleware.process_response(req, write_view(req))
         assert cache.get(self.cache_key) is not None
 
+    def tearDown(self):
+        cache.clear()
+
 
 class UseMasterTests(TestCase):
     def test_decorator(self):
