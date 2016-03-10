@@ -1,4 +1,6 @@
 from threading import Lock, Thread
+
+from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.test import TestCase
 
@@ -7,7 +9,7 @@ from nose.tools import eq_
 from multidb import (DEFAULT_DB_ALIAS, MasterSlaveRouter,
                      PinningMasterSlaveRouter, get_slave)
 from multidb.middleware import (PINNING_COOKIE, PINNING_SECONDS,
-                                PinningRouterMiddleware)
+                                PinningRouterMiddleware, PinUsingCacheRouterMiddleware)
 from multidb.pinning import (this_thread_is_pinned, pin_this_thread,
                              unpin_this_thread, use_master, db_write)
 
@@ -93,11 +95,11 @@ class PinningTests(UnpinningTestCase):
         read_view(HttpRequest())
 
 
-class MiddlewareTests(UnpinningTestCase):
+class MiddlewareUsingCookieTests(UnpinningTestCase):
     """Tests for the middleware that supports pinning"""
 
     def setUp(self):
-        super(MiddlewareTests, self).setUp()
+        super(MiddlewareUsingCookieTests, self).setUp()
 
         # Every test uses these, so they're okay as attrs.
         self.request = HttpRequest()
@@ -159,6 +161,72 @@ class MiddlewareTests(UnpinningTestCase):
             return HttpResponse()
         response = self.middleware.process_response(req, write_view(req))
         assert PINNING_COOKIE in response.cookies
+
+
+class MiddlewareUsingCacheTests(UnpinningTestCase):
+    """Tests for the middleware that supports pinning"""
+
+    def setUp(self):
+        super(MiddlewareUsingCacheTests, self).setUp()
+
+        # Every test uses these, so they're okay as attrs.
+        self.request = HttpRequest()
+        self.middleware = PinUsingCacheRouterMiddleware()
+        self.cache_key = self.middleware.get_cache_key(self.request)
+
+    def test_pin_on_cache_set(self):
+        """Thread should pin when the cache is set."""
+        cache.set(self.cache_key, 'y')
+
+        self.middleware.process_request(self.request)
+        assert this_thread_is_pinned()
+
+    def test_unpin_on_no_cache(self):
+        """Thread should unpin when cache isn't set and method is GET."""
+        pin_this_thread()
+        self.request.method = 'GET'
+        self.middleware.process_request(self.request)
+        assert not this_thread_is_pinned()
+
+    def test_pin_on_post(self):
+        """Thread should pin when method is POST."""
+        self.request.method = 'POST'
+        self.middleware.process_request(self.request)
+        assert this_thread_is_pinned()
+
+    def test_process_response(self):
+        """Make sure the cache gets set on POSTs but not GETs."""
+
+        self.request.method = 'GET'
+        self.middleware.process_response(self.request, HttpResponse())
+        assert cache.get(self.cache_key) is None
+
+        self.request.method = 'POST'
+        self.middleware.process_response(self.request, HttpResponse())
+        assert cache.get(self.cache_key) is not None
+
+    def test_attribute(self):
+        """The cache should get set if the _db_write attribute is True."""
+        res = HttpResponse()
+        res._db_write = True
+        self.middleware.process_response(self.request, res)
+        assert cache.get(self.cache_key) is not None
+
+    def test_db_write_decorator(self):
+        """The @db_write decorator should make any view set the cache."""
+        req = self.request
+        req.method = 'GET'
+
+        def view(req):
+            return HttpResponse()
+        self.middleware.process_response(req, view(req))
+        assert cache.get(self.cache_key) is None
+
+        @db_write
+        def write_view(req):
+            return HttpResponse()
+        self.middleware.process_response(req, write_view(req))
+        assert cache.get(self.cache_key) is not None
 
 
 class UseMasterTests(TestCase):

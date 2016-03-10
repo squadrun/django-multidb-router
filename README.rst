@@ -1,3 +1,6 @@
+.. image:: https://travis-ci.org/squadrun/django-multidb-router.svg?branch=master
+    :target: https://travis-ci.org/squadrun/django-multidb-router
+
 ``multidb`` provides two Django database routers useful in master-slave
 deployments.
 
