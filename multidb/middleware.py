@@ -65,15 +65,18 @@ class PinUsingCacheRouterMiddleware(object):
     DB router.
     """
     def get_cache_key(self, request):
-        session_key = request.session.session_key
-        return "multidb.middleware.PinUsingCacheRouterMiddleware.{0}".format(session_key)
+        session = request.session
+        if session and session.session_key:
+            return "multidb.middleware.PinUsingCacheRouterMiddleware.{0}".format(session.session_key)
+        return None
 
     def process_request(self, request):
         """
         Set the thread's pinning flag according to the presence of the cache value.
         """
+        cache_key = self.get_cache_key(request)
 
-        to_pin = cache.get(self.get_cache_key(request))
+        to_pin = cache.get(cache_key) if cache_key else False
 
         if to_pin or request.method not in READ_ONLY_METHODS:
             pin_this_thread()
@@ -89,5 +92,7 @@ class PinUsingCacheRouterMiddleware(object):
         """
         if (request.method not in READ_ONLY_METHODS or
                 getattr(response, '_db_write', False)):
-            cache.set(self.get_cache_key(request), "y", PINNING_SECONDS)
+            cache_key = self.get_cache_key(request)
+            if cache_key:
+                cache.set(cache_key, "y", PINNING_SECONDS)
         return response

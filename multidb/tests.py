@@ -1,10 +1,10 @@
-from importlib import import_module
 from threading import Lock, Thread
 
 from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.test import TestCase
+from django.utils.importlib import import_module
 
 from nose.tools import eq_
 
