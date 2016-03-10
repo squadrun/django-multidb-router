@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.cache import cache
 
 from .pinning import pin_this_thread, unpin_this_thread
 
@@ -48,4 +49,45 @@ class PinningRouterMiddleware(object):
                 getattr(response, '_db_write', False)):
             response.set_cookie(PINNING_COOKIE, value='y',
                                 max_age=PINNING_SECONDS)
+        return response
+
+
+class PinUsingCacheRouterMiddleware(object):
+    """
+    Middleware to support the PinningMasterSlaveRouter.
+    Works similar to PinningRouterMiddleware but uses cache instead of cookies
+
+    Sets a cache respective to the session_key of the user who has just written, causing subsequent
+    DB reads (for some period of time, hopefully exceeding replication lag)
+    to be handled by the master.
+
+    When the cache key is detected to have a value for a request, sets a thread-local to alert the
+    DB router.
+    """
+    def get_cache_key(self, request):
+        session_key = request.session.session_key
+        return "multidb.middleware.PinUsingCacheRouterMiddleware.{0}".format(session_key)
+
+    def process_request(self, request):
+        """
+        Set the thread's pinning flag according to the presence of the cache value.
+        """
+
+        to_pin = cache.get(self.get_cache_key(request))
+
+        if to_pin or request.method not in READ_ONLY_METHODS:
+            pin_this_thread()
+        else:
+            # In case the last request this thread served was pinned:
+            unpin_this_thread()
+
+    def process_response(self, request, response):
+        """For some HTTP methods, assume there was a DB write and set the cache.
+
+        Even if it was already set, reset its expiration time.
+
+        """
+        if (request.method not in READ_ONLY_METHODS or
+                getattr(response, '_db_write', False)):
+            cache.set(self.get_cache_key(request), "y", PINNING_SECONDS)
         return response
