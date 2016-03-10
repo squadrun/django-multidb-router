@@ -1,5 +1,7 @@
+from importlib import import_module
 from threading import Lock, Thread
 
+from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.test import TestCase
@@ -172,6 +174,10 @@ class MiddlewareUsingCacheTests(UnpinningTestCase):
         # Every test uses these, so they're okay as attrs.
         self.request = HttpRequest()
         self.middleware = PinUsingCacheRouterMiddleware()
+        engine = import_module(settings.SESSION_ENGINE)
+        session_key = "test"
+        self.request.session = engine.SessionStore(session_key)
+
         self.cache_key = self.middleware.get_cache_key(self.request)
 
     def test_pin_on_cache_set(self):
